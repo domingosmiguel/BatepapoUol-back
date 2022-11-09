@@ -1,13 +1,19 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
+import Joi from 'joi';
 import { MongoClient, ObjectId } from 'mongodb';
 import { stripHtml } from 'string-strip-html';
 import { collectionsName, databaseName, serverAnswers } from './const.js';
 import { timeUTC } from './functions.js';
 
 dotenv.config();
-
+const schema = Joi.object({
+  username: Joi.string().alphanum().min(3).max(20),
+  to: Joi.string().alphanum().min(3).max(20),
+  text: Joi.string().min(3).max(140),
+  type: Joi.string().pattern(/^(message|private_message)$/),
+});
 const server = express();
 server.use(express.json());
 server.use(cors());
@@ -48,10 +54,9 @@ function statusMessage(from, text) {
   });
 }
 
-// Validation
 server.post('/participants', (req, res) => {
   const name = stripHtml(req.body.name).result;
-  const valid = true;
+  const valid = !schema.validate({ username: name }).error;
   if (!valid) {
     return res
       .status(serverAnswers.postParticipants.invalidUser.code)
@@ -77,13 +82,12 @@ server.get('/participants', (req, res) => {
     .then((allUsers) => res.send(allUsers));
 });
 
-// Validation
 server.post('/messages', (req, res) => {
   const from = stripHtml(req.headers.user).result;
   const to = stripHtml(req.body.to).result;
   const text = stripHtml(req.body.text).result;
   const type = stripHtml(req.body.type).result;
-  const valid = true;
+  const valid = !schema.validate({ username: from, to, text, type }).error;
   if (!valid) {
     return res
       .status(serverAnswers.postMsgs.invalidMsg.code)
@@ -126,7 +130,6 @@ server.post('/status', (req, res) => {
   });
 });
 
-// Bonuses
 server.delete('/messages/:ID', (req, res) => {
   const { user } = req.headers;
   const { ID } = req.params;
@@ -141,14 +144,14 @@ server.delete('/messages/:ID', (req, res) => {
   messages.deleteOne({ _id: ObjectId(ID) });
   return res.sendStatus(serverAnswers.deleteMsgs.msgDeleted.code);
 });
-// Validation
+
 server.put('/messages/:ID', (req, res) => {
   const from = req.headers.user;
   const { ID } = req.params;
   const to = stripHtml(req.body.to).result;
   const text = stripHtml(req.body.text).result;
   const type = stripHtml(req.body.type).result;
-  const valid = true;
+  const valid = !schema.validate({ username: from, to, text, type }).error;
   if (!valid) {
     return res
       .status(serverAnswers.editMsgs.invalidMsg.code)
