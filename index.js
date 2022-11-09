@@ -1,57 +1,20 @@
+import { collectionsName, databaseName, serverAnswers } from 'const.js';
 import cors from 'cors';
 import dayjs from 'dayjs';
-import advancedFormat from 'dayjs/plugin/advancedFormat.js';
 import utc from 'dayjs/plugin/utc.js';
 import dotenv from 'dotenv';
 import express from 'express';
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
+import { stripHtml } from 'string-strip-html';
 
 dotenv.config();
 dayjs.extend(utc);
-dayjs.extend(advancedFormat);
 function timeUTC() {
   return dayjs.utc().format('HH:mm:ss');
 }
 
 const server = express();
-const databaseName = 'batepapoUol';
-const collectionsName = {
-  usersList: 'users',
-  messagesList: 'messages',
-};
-const serverAnswers = {
-  postParticipants: {
-    invalidUser: {
-      code: 422,
-      message: 'Apelido deve ter entre 3 e 20 caracteres',
-    },
-    userAlreadyExists: {
-      code: 409,
-      message: 'Usuário já existe',
-    },
-    userCreated: {
-      code: 201,
-    },
-  },
-  postMessages: {
-    invalidMessage: {
-      code: 422,
-      message:
-        "'to' e 'text' devem ser strings não vazias, 'type' só pode ser 'message' ou 'private_message', 'from' deve ser um participante existente na lista de participantes.",
-    },
-    messageCreated: {
-      code: 201,
-    },
-  },
-  postStatus: {
-    userNotFound: {
-      code: 404,
-    },
-    statusUpdated: {
-      code: 200,
-    },
-  },
-};
+
 let users;
 let messages;
 server.use(express.json());
@@ -66,6 +29,16 @@ mongoClient.connect().then(() => {
   messages = db.collection(collectionsName.messagesList);
 });
 
+function statusMessage(from, text) {
+  messages.insertOne({
+    from,
+    to: 'Todos',
+    text,
+    type: 'status',
+    time: timeUTC(),
+  });
+}
+
 setInterval(() => {
   users
     .find()
@@ -73,21 +46,16 @@ setInterval(() => {
     .then((allUsers) => {
       allUsers.forEach((user) => {
         if (Date.now() - user.lastStatus > 10000) {
-          users.remove({ name: user.name });
-          messages.insertOne({
-            from: user.name,
-            to: 'Todos',
-            text: 'sai da sala...',
-            type: 'status',
-            time: timeUTC(),
-          });
+          users.deleteOne({ name: user.name });
+          statusMessage(user.name, 'sai da sala...');
         }
       });
     });
 }, 15000);
 
+// Validation
 server.post('/participants', (req, res) => {
-  const { name } = req.body;
+  const name = stripHtml(req.body.name).result;
   const valid = true;
   if (!valid) {
     return res
@@ -101,17 +69,12 @@ server.post('/participants', (req, res) => {
         .send(serverAnswers.postParticipants.userAlreadyExists.message);
     }
     users.insertOne({ name, lastStatus: Date.now() });
-    messages.insertOne({
-      from: name,
-      to: 'Todos',
-      text: 'entra na sala...',
-      type: 'status',
-      time: timeUTC(),
-    });
+    statusMessage(name, 'entra na sala...');
     return res.sendStatus(serverAnswers.postParticipants.userCreated.code);
   });
 });
 
+// .find({}, { _id: 0}) does not work
 server.get('/participants', (req, res) => {
   users
     .find({}, { _id: 0 })
@@ -119,36 +82,36 @@ server.get('/participants', (req, res) => {
     .then((allUsers) => res.send(allUsers));
 });
 
+// Validation
 server.post('/messages', (req, res) => {
-  const from = req.headers.user;
-  const { to, text, type } = req.body;
+  const from = stripHtml(req.headers.user).result;
+  const to = stripHtml(req.body.to).result;
+  const text = stripHtml(req.body.text).result;
+  const type = stripHtml(req.body.type).result;
   const valid = true;
   if (!valid) {
     return res
-      .status(serverAnswers.postMessages.invalidMessage.code)
-      .send(serverAnswers.postMessages.invalidMessage.message);
+      .status(serverAnswers.postMsgs.invalidMsg.code)
+      .send(serverAnswers.postMsgs.invalidMsg.message);
   }
-  const timeUTC = dayjs.utc().format('HH:mm:ss');
   messages.insertOne({
     from,
     to,
     text,
     type,
-    time: timeUTC,
+    time: timeUTC(),
   });
-  return res.sendStatus(serverAnswers.postMessages.messageCreated.code);
+  return res.sendStatus(serverAnswers.postMsgs.msgCreated.code);
 });
 
 server.get('/messages', (req, res) => {
-  const from = req.headers.user;
+  let from = req.headers.user;
+  from = from.trim();
   const to = from;
-  const numOfMessages = req?.query?.limit;
+  const numOfMessages = req.query?.limit;
 
   messages
-    .find(
-      { $or: [{ from }, { to }, { type: { $in: ['message', 'status'] } }] },
-      { _id: 0 }
-    )
+    .find({ $or: [{ from }, { to }, { type: { $in: ['message', 'status'] } }] })
     .toArray()
     // .then((allMessages) => res.send(allMessages));
     .then((allMessages) => res.send(allMessages.slice(-numOfMessages)));
@@ -156,23 +119,57 @@ server.get('/messages', (req, res) => {
 });
 
 server.post('/status', (req, res) => {
-  const { user } = req.headers;
-  users.findOne({ name: user }).then((promise) => {
-    if (promise === null) {
+  let { user } = req.headers;
+  user = user.trim();
+  users.findOne({ name: user }).then((user) => {
+    if (user === null) {
       return res.sendStatus(serverAnswers.postStatus.userNotFound.code);
     }
-    users.updateOne(
-      {
-        _id: promise._id,
-      },
-      {
-        $set: {
-          lastStatus: Date.now(),
-        },
-      }
-    );
+    users.updateOne({ _id: user._id }, { $set: { lastStatus: Date.now() } });
     return res.sendStatus(serverAnswers.postStatus.statusUpdated.code);
   });
 });
 
-server.listen(5000);
+// Bonuses
+server.delete('/messages/:ID', (req, res) => {
+  const { user } = req.headers;
+  const { ID } = req.params;
+  messages.findOne({ _id: ObjectId(ID) }).then((message) => {
+    if (message === null) {
+      return res.sendStatus(serverAnswers.deleteMsgs.msgNotFound.code);
+    }
+    if (message.from !== user) {
+      return res.sendStatus(serverAnswers.deleteMsgs.userNotOwner.code);
+    }
+  });
+  messages.deleteOne({ _id: ObjectId(ID) });
+  return res.sendStatus(serverAnswers.deleteMsgs.msgDeleted.code);
+});
+// Validation
+server.put('/messages/:ID', (req, res) => {
+  const from = req.headers.user;
+  const { ID } = req.params;
+  const to = stripHtml(req.body.to).result;
+  const text = stripHtml(req.body.text).result;
+  const type = stripHtml(req.body.type).result;
+  const valid = true;
+  if (!valid) {
+    return res
+      .status(serverAnswers.editMsgs.invalidMsg.code)
+      .send(serverAnswers.editMsgs.invalidMsg.message);
+  }
+  messages.findOne({ _id: ObjectId(ID) }).then((message) => {
+    if (message === null) {
+      return res.sendStatus(serverAnswers.editMsgs.msgNotFound.code);
+    }
+    if (message.from !== from) {
+      return res.sendStatus(serverAnswers.editMsgs.userNotOwner.code);
+    }
+  });
+  messages.updateOne({ _id: ObjectId(ID) }, { $set: { to, text, type } });
+  return res.sendStatus(serverAnswers.deleteMsgs.msgDeleted.code);
+});
+
+server.listen(5000, () => {
+  console.log('listening port 5000');
+});
