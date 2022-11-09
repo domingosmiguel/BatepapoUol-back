@@ -29,6 +29,16 @@ const serverAnswers = {
       code: 201,
     },
   },
+  postMessages: {
+    invalidMessage: {
+      code: 422,
+      message:
+        "'to' e 'text' devem ser strings não vazias, 'type' só pode ser 'message' ou 'private_message', 'from' deve ser um participante existente na lista de participantes.",
+    },
+    messageCreated: {
+      code: 201,
+    },
+  },
 };
 let users;
 let messages;
@@ -76,6 +86,37 @@ server.get('/participants', (req, res) => {
     .find()
     .toArray()
     .then((allUsers) => res.send(allUsers));
+});
+
+server.post('/messages', (req, res) => {
+  const from = req.header.user;
+  const { to, text, type } = req.body;
+  const valid = true;
+  if (!valid) {
+    return res
+      .status(serverAnswers.postMessages.invalidMessage.code)
+      .send(serverAnswers.postMessages.invalidMessage.message);
+  }
+  const timeUTC = dayjs.utc().format('HH:mm:ss');
+  messages.insertOne({
+    from,
+    to,
+    text,
+    type,
+    time: timeUTC,
+  });
+  return res.sendStatus(serverAnswers.postMessages.userCreated.code);
+});
+
+server.get('/messages', (req, res) => {
+  const from = req.header.user;
+  const to = from;
+  const { numOfMessages } = req.query.limit;
+
+  messages
+    .find({ $or: [{ from }, { to }] })
+    .toArray()
+    .then((allMessages) => res.send(allMessages.slice(-numOfMessages || 0)));
 });
 
 server.listen(5000);
