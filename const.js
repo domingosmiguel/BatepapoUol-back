@@ -1,4 +1,5 @@
 const databaseName = 'batepapoUol';
+
 const collectionsName = {
   usersList: 'users',
   messagesList: 'messages',

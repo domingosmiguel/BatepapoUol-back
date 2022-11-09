@@ -1,24 +1,19 @@
-import { collectionsName, databaseName, serverAnswers } from 'const.js';
 import cors from 'cors';
-import dayjs from 'dayjs';
-import utc from 'dayjs/plugin/utc.js';
 import dotenv from 'dotenv';
 import express from 'express';
 import { MongoClient, ObjectId } from 'mongodb';
 import { stripHtml } from 'string-strip-html';
+import { collectionsName, databaseName, serverAnswers } from './const.js';
+import { timeUTC } from './functions.js';
 
 dotenv.config();
-dayjs.extend(utc);
-function timeUTC() {
-  return dayjs.utc().format('HH:mm:ss');
-}
 
 const server = express();
+server.use(express.json());
+server.use(cors());
 
 let users;
 let messages;
-server.use(express.json());
-server.use(cors());
 
 const mongoClient = new MongoClient(process.env.MONGO_URI);
 let db;
@@ -28,16 +23,6 @@ mongoClient.connect().then(() => {
   users = db.collection(collectionsName.usersList);
   messages = db.collection(collectionsName.messagesList);
 });
-
-function statusMessage(from, text) {
-  messages.insertOne({
-    from,
-    to: 'Todos',
-    text,
-    type: 'status',
-    time: timeUTC(),
-  });
-}
 
 setInterval(() => {
   users
@@ -52,6 +37,16 @@ setInterval(() => {
       });
     });
 }, 15000);
+
+function statusMessage(from, text) {
+  messages.insertOne({
+    from,
+    to: 'Todos',
+    text,
+    type: 'status',
+    time: timeUTC(),
+  });
+}
 
 // Validation
 server.post('/participants', (req, res) => {
@@ -104,18 +99,19 @@ server.post('/messages', (req, res) => {
   return res.sendStatus(serverAnswers.postMsgs.msgCreated.code);
 });
 
+// slice no .find()??
 server.get('/messages', (req, res) => {
-  let from = req.headers.user;
-  from = from.trim();
+  const from = stripHtml(req.headers.user).result;
   const to = from;
-  const numOfMessages = req.query?.limit;
+  const { limit } = req.query;
 
   messages
     .find({ $or: [{ from }, { to }, { type: { $in: ['message', 'status'] } }] })
+    // .sort({ _id: -1 })
+    .limit(-limit)
     .toArray()
-    // .then((allMessages) => res.send(allMessages));
-    .then((allMessages) => res.send(allMessages.slice(-numOfMessages)));
-  // .then((allMessages) => res.send(allMessages.slice(-numOfMessages || 0)));
+    .then((allMessages) => res.send(allMessages.slice(-limit)));
+  // .then((allMessages) => res.send(allMessages));
 });
 
 server.post('/status', (req, res) => {
@@ -165,9 +161,9 @@ server.put('/messages/:ID', (req, res) => {
     if (message.from !== from) {
       return res.sendStatus(serverAnswers.editMsgs.userNotOwner.code);
     }
+    messages.updateOne({ _id: ObjectId(ID) }, { $set: { to, text, type } });
+    return res.sendStatus(serverAnswers.deleteMsgs.msgDeleted.code);
   });
-  messages.updateOne({ _id: ObjectId(ID) }, { $set: { to, text, type } });
-  return res.sendStatus(serverAnswers.deleteMsgs.msgDeleted.code);
 });
 
 server.listen(5000, () => {
