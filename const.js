@@ -5,6 +5,7 @@ const collectionsName = {
   messagesList: 'messages',
 };
 const serverAnswers = {
+  databaseProblem: { code: 500 },
   postParticipants: {
     invalidUser: {
       code: 422,

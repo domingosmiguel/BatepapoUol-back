@@ -30,6 +30,16 @@ mongoClient.connect().then(() => {
   messages = db.collection(collectionsName.messagesList);
 });
 
+function statusMessage(from, text) {
+  messages.insertOne({
+    from,
+    to: 'Todos',
+    text,
+    type: 'status',
+    time: timeUTC(),
+  });
+}
+
 setInterval(() => {
   users
     .find()
@@ -44,17 +54,7 @@ setInterval(() => {
     });
 }, 15000);
 
-function statusMessage(from, text) {
-  messages.insertOne({
-    from,
-    to: 'Todos',
-    text,
-    type: 'status',
-    time: timeUTC(),
-  });
-}
-
-server.post('/participants', (req, res) => {
+server.post('/participants', async (req, res) => {
   const name = stripHtml(req.body.name).result;
   const valid = !schema.validate({ username: name }).error;
   if (!valid) {
@@ -62,7 +62,8 @@ server.post('/participants', (req, res) => {
       .status(serverAnswers.postParticipants.invalidUser.code)
       .send(serverAnswers.postParticipants.invalidUser.message);
   }
-  users.findOne({ name }).then((user) => {
+  try {
+    const user = await users.findOne({ name });
     if (user !== null) {
       return res
         .status(serverAnswers.postParticipants.userAlreadyExists.code)
@@ -71,18 +72,22 @@ server.post('/participants', (req, res) => {
     users.insertOne({ name, lastStatus: Date.now() });
     statusMessage(name, 'entra na sala...');
     return res.sendStatus(serverAnswers.postParticipants.userCreated.code);
-  });
+  } catch (error) {
+    return res.sendStatus(serverAnswers.databaseProblem.code);
+  }
 });
 
 // .find({}, { _id: 0}) does not work
-server.get('/participants', (req, res) => {
-  users
-    .find({}, { _id: 0 })
-    .toArray()
-    .then((allUsers) => res.send(allUsers));
+server.get('/participants', async (req, res) => {
+  try {
+    const allUsers = await users.find({}, { _id: 0 }).toArray();
+    return res.send(allUsers);
+  } catch (error) {
+    return res.sendStatus(serverAnswers.databaseProblem.code);
+  }
 });
 
-server.post('/messages', (req, res) => {
+server.post('/messages', async (req, res) => {
   const from = stripHtml(req.headers.user).result;
   const to = stripHtml(req.body.to).result;
   const text = stripHtml(req.body.text).result;
@@ -93,59 +98,76 @@ server.post('/messages', (req, res) => {
       .status(serverAnswers.postMsgs.invalidMsg.code)
       .send(serverAnswers.postMsgs.invalidMsg.message);
   }
-  messages.insertOne({
-    from,
-    to,
-    text,
-    type,
-    time: timeUTC(),
-  });
-  return res.sendStatus(serverAnswers.postMsgs.msgCreated.code);
+  try {
+    await messages.insertOne({
+      from,
+      to,
+      text,
+      type,
+      time: timeUTC(),
+    });
+    return res.sendStatus(serverAnswers.postMsgs.msgCreated.code);
+  } catch (error) {
+    return res.sendStatus(serverAnswers.databaseProblem.code);
+  }
 });
 
-// slice no .find()??
-server.get('/messages', (req, res) => {
+// $slice no .find()??
+server.get('/messages', async (req, res) => {
   const from = stripHtml(req.headers.user).result;
   const to = from;
   const { limit } = req.query;
 
-  messages
-    .find({ $or: [{ from }, { to }, { type: { $in: ['message', 'status'] } }] })
-    // .sort({ _id: -1 })
-    .limit(-limit)
-    .toArray()
-    .then((allMessages) => res.send(allMessages.slice(-limit)));
-  // .then((allMessages) => res.send(allMessages));
+  try {
+    const allMessages = await messages
+      .find({
+        $or: [{ from }, { to }, { type: { $in: ['message', 'status'] } }],
+      })
+      .limit(-limit)
+      .toArray();
+    return res.send(allMessages.slice(-limit));
+  } catch (error) {
+    return res.sendStatus(serverAnswers.databaseProblem.code);
+  }
 });
 
-server.post('/status', (req, res) => {
+server.post('/status', async (req, res) => {
   let { user } = req.headers;
   user = user.trim();
-  users.findOne({ name: user }).then((user) => {
-    if (user === null) {
+  try {
+    const userData = await users.findOne({ name: user });
+    if (userData === null) {
       return res.sendStatus(serverAnswers.postStatus.userNotFound.code);
     }
-    users.updateOne({ _id: user._id }, { $set: { lastStatus: Date.now() } });
+    users.updateOne(
+      { _id: userData._id },
+      { $set: { lastStatus: Date.now() } }
+    );
     return res.sendStatus(serverAnswers.postStatus.statusUpdated.code);
-  });
+  } catch (error) {
+    return res.sendStatus(serverAnswers.databaseProblem.code);
+  }
 });
 
-server.delete('/messages/:ID', (req, res) => {
+server.delete('/messages/:ID', async (req, res) => {
   const { user } = req.headers;
   const { ID } = req.params;
-  messages.findOne({ _id: ObjectId(ID) }).then((message) => {
+  try {
+    const message = await messages.findOne({ _id: ObjectId(ID) });
     if (message === null) {
       return res.sendStatus(serverAnswers.deleteMsgs.msgNotFound.code);
     }
     if (message.from !== user) {
       return res.sendStatus(serverAnswers.deleteMsgs.userNotOwner.code);
     }
-  });
-  messages.deleteOne({ _id: ObjectId(ID) });
-  return res.sendStatus(serverAnswers.deleteMsgs.msgDeleted.code);
+    messages.deleteOne({ _id: ObjectId(ID) });
+    return res.sendStatus(serverAnswers.deleteMsgs.msgDeleted.code);
+  } catch (error) {
+    return res.sendStatus(serverAnswers.databaseProblem.code);
+  }
 });
 
-server.put('/messages/:ID', (req, res) => {
+server.put('/messages/:ID', async (req, res) => {
   const from = req.headers.user;
   const { ID } = req.params;
   const to = stripHtml(req.body.to).result;
@@ -157,18 +179,20 @@ server.put('/messages/:ID', (req, res) => {
       .status(serverAnswers.editMsgs.invalidMsg.code)
       .send(serverAnswers.editMsgs.invalidMsg.message);
   }
-  messages.findOne({ _id: ObjectId(ID) }).then((message) => {
+  try {
+    const message = await messages.findOne({ _id: ObjectId(ID) });
     if (message === null) {
       return res.sendStatus(serverAnswers.editMsgs.msgNotFound.code);
     }
-    if (message.from !== from) {
-      return res.sendStatus(serverAnswers.editMsgs.userNotOwner.code);
-    }
     messages.updateOne({ _id: ObjectId(ID) }, { $set: { to, text, type } });
     return res.sendStatus(serverAnswers.deleteMsgs.msgDeleted.code);
-  });
+  } catch (error) {
+    return res.sendStatus(serverAnswers.databaseProblem.code);
+  }
 });
 
-server.listen(5000, () => {
-  console.log('listening port 5000');
+const port = process.env.PORT || 5000;
+
+server.listen(port, () => {
+  console.log(`Listening on port ${port}`);
 });
