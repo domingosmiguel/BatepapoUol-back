@@ -9,9 +9,9 @@ import { timeUTC } from './functions.js';
 
 dotenv.config();
 const schema = Joi.object({
-  username: Joi.string().alphanum().min(3).max(20),
-  to: Joi.string().alphanum().min(3).max(20),
-  text: Joi.string().min(3).max(140),
+  username: Joi.string().min(3).max(20),
+  to: Joi.string().min(3).max(20),
+  text: Joi.string().min(1).max(280),
   type: Joi.string().pattern(/^(message|private_message)$/),
 });
 const server = express();
@@ -55,7 +55,7 @@ setInterval(() => {
 }, 15000);
 
 server.post('/participants', async (req, res) => {
-  const name = stripHtml(req.body.name).result;
+  const name = stripHtml(req.body.name || '').result;
   const valid = !schema.validate({ username: name }).error;
   if (!valid) {
     return res
@@ -88,10 +88,10 @@ server.get('/participants', async (req, res) => {
 });
 
 server.post('/messages', async (req, res) => {
-  const from = stripHtml(req.headers.user).result;
-  const to = stripHtml(req.body.to).result;
-  const text = stripHtml(req.body.text).result;
-  const type = stripHtml(req.body.type).result;
+  const from = stripHtml(req.headers.user || '').result;
+  const to = stripHtml(req.body.to || '').result;
+  const text = stripHtml(req.body.text || '').result;
+  const type = stripHtml(req.body.type || '').result;
   const valid = !schema.validate({ username: from, to, text, type }).error;
   if (!valid) {
     return res
@@ -114,16 +114,20 @@ server.post('/messages', async (req, res) => {
 
 // $slice no .find()??
 server.get('/messages', async (req, res) => {
-  const from = stripHtml(req.headers.user).result;
+  const from = stripHtml(req.headers.user || '').result;
   const to = from;
-  const { limit } = req.query;
+  const limit = parseInt(req.query.limit, 10);
 
   try {
     const allMessages = await messages
       .find({
-        $or: [{ from }, { to }, { type: { $in: ['message', 'status'] } }],
+        $or: [
+          { from },
+          { to },
+          { to: 'Todos' },
+          { type: { $in: ['message', 'status'] } },
+        ],
       })
-      .limit(-limit)
       .toArray();
     return res.send(allMessages.slice(-limit));
   } catch (error) {
@@ -170,9 +174,9 @@ server.delete('/messages/:ID', async (req, res) => {
 server.put('/messages/:ID', async (req, res) => {
   const from = req.headers.user;
   const { ID } = req.params;
-  const to = stripHtml(req.body.to).result;
-  const text = stripHtml(req.body.text).result;
-  const type = stripHtml(req.body.type).result;
+  const to = stripHtml(req.body.to || '').result;
+  const text = stripHtml(req.body.text || '').result;
+  const type = stripHtml(req.body.type || '').result;
   const valid = !schema.validate({ username: from, to, text, type }).error;
   if (!valid) {
     return res
