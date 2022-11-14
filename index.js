@@ -1,19 +1,18 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
-import Joi from 'joi';
 import { MongoClient, ObjectId } from 'mongodb';
 import { stripHtml } from 'string-strip-html';
-import { collectionsName, databaseName, serverAnswers } from './const.js';
-import { timeUTC } from './functions.js';
+import {
+  collectionsName,
+  databaseName,
+  serverAnswers
+} from './assets/const.js';
+import { timeUTC } from './assets/functions.js';
+import { messageSchema, userSchema } from './assets/schemas.js';
 
 dotenv.config();
-const schema = Joi.object({
-  username: Joi.string().min(3).max(20),
-  to: Joi.string().min(3).max(20),
-  text: Joi.string().min(1).max(280),
-  type: Joi.string().pattern(/^(message|private_message)$/),
-});
+
 const server = express();
 server.use(express.json());
 server.use(cors());
@@ -55,8 +54,8 @@ setInterval(() => {
 }, 15000);
 
 server.post('/participants', async (req, res) => {
-  const name = stripHtml(req.body.name || '').result;
-  const valid = !schema.validate({ username: name }).error;
+  const name = stripHtml(req.body.name ?? '').result;
+  const valid = !userSchema.validate({ name }).error;
   if (!valid) {
     return res
       .status(serverAnswers.postParticipants.invalidUser.code)
@@ -77,10 +76,9 @@ server.post('/participants', async (req, res) => {
   }
 });
 
-// .find({}, { _id: 0}) does not work
 server.get('/participants', async (req, res) => {
   try {
-    const allUsers = await users.find({}, { _id: 0 }).toArray();
+    const allUsers = await users.find().toArray();
     return res.send(allUsers);
   } catch (error) {
     return res.sendStatus(serverAnswers.databaseProblem.code);
@@ -88,11 +86,11 @@ server.get('/participants', async (req, res) => {
 });
 
 server.post('/messages', async (req, res) => {
-  const from = stripHtml(req.headers.user || '').result;
-  const to = stripHtml(req.body.to || '').result;
-  const text = stripHtml(req.body.text || '').result;
-  const type = stripHtml(req.body.type || '').result;
-  const valid = !schema.validate({ username: from, to, text, type }).error;
+  const from = stripHtml(req.headers.user ?? '').result;
+  const to = stripHtml(req.body.to ?? '').result;
+  const text = stripHtml(req.body.text ?? '').result;
+  const type = stripHtml(req.body.type ?? '').result;
+  const valid = !messageSchema.validate({ from, to, text, type }).error;
   if (!valid) {
     return res
       .status(serverAnswers.postMsgs.invalidMsg.code)
@@ -112,9 +110,8 @@ server.post('/messages', async (req, res) => {
   }
 });
 
-// $slice no .find()??
 server.get('/messages', async (req, res) => {
-  const from = stripHtml(req.headers.user || '').result;
+  const from = stripHtml(req.headers.user ?? '').result;
   const to = from;
   const limit = parseInt(req.query.limit, 10);
 
@@ -174,10 +171,10 @@ server.delete('/messages/:ID', async (req, res) => {
 server.put('/messages/:ID', async (req, res) => {
   const from = req.headers.user;
   const { ID } = req.params;
-  const to = stripHtml(req.body.to || '').result;
-  const text = stripHtml(req.body.text || '').result;
-  const type = stripHtml(req.body.type || '').result;
-  const valid = !schema.validate({ username: from, to, text, type }).error;
+  const to = stripHtml(req.body.to ?? '').result;
+  const text = stripHtml(req.body.text ?? '').result;
+  const type = stripHtml(req.body.type ?? '').result;
+  const valid = !messageSchema.validate({ from, to, text, type }).error;
   if (!valid) {
     return res
       .status(serverAnswers.editMsgs.invalidMsg.code)
