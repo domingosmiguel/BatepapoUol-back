@@ -2,13 +2,12 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import express from 'express';
 import { MongoClient, ObjectId } from 'mongodb';
-import { stripHtml } from 'string-strip-html';
 import {
   collectionsName,
   databaseName,
   serverAnswers
 } from './assets/const.js';
-import { timeUTC } from './assets/functions.js';
+import { clearHTML, timeUTC } from './assets/functions.js';
 import { messageSchema, userSchema } from './assets/schemas.js';
 
 dotenv.config();
@@ -54,7 +53,7 @@ setInterval(() => {
 }, 15000);
 
 server.post('/participants', async (req, res) => {
-  const name = stripHtml(req.body.name ?? '').result;
+  const name = clearHTML(req.body.name);
   const valid = !userSchema.validate({ name }).error;
   if (!valid) {
     return res
@@ -86,10 +85,8 @@ server.get('/participants', async (req, res) => {
 });
 
 server.post('/messages', async (req, res) => {
-  const from = stripHtml(req.headers.user ?? '').result;
-  const to = stripHtml(req.body.to ?? '').result;
-  const text = stripHtml(req.body.text ?? '').result;
-  const type = stripHtml(req.body.type ?? '').result;
+  const from = clearHTML(req.headers.user);
+  const { to, text, type } = clearHTML(req.body);
   const valid = !messageSchema.validate({ from, to, text, type }).error;
   if (!valid) {
     return res
@@ -111,9 +108,9 @@ server.post('/messages', async (req, res) => {
 });
 
 server.get('/messages', async (req, res) => {
-  const from = stripHtml(req.headers.user ?? '').result;
+  const from = clearHTML(req.headers.user);
   const to = from;
-  const limit = parseInt(req.query.limit, 10);
+  const limit = parseInt(clearHTML(req.query.limit), 10);
 
   try {
     const allMessages = await messages
@@ -133,8 +130,7 @@ server.get('/messages', async (req, res) => {
 });
 
 server.post('/status', async (req, res) => {
-  let { user } = req.headers;
-  user = user.trim();
+  const user = clearHTML(req.headers.user);
   try {
     const userData = await users.findOne({ name: user });
     if (userData === null) {
@@ -151,8 +147,8 @@ server.post('/status', async (req, res) => {
 });
 
 server.delete('/messages/:ID', async (req, res) => {
-  const { user } = req.headers;
-  const { ID } = req.params;
+  const user = clearHTML(req.headers.user);
+  const ID = clearHTML(req.params.ID);
   try {
     const message = await messages.findOne({ _id: ObjectId(ID) });
     if (message === null) {
@@ -169,11 +165,9 @@ server.delete('/messages/:ID', async (req, res) => {
 });
 
 server.put('/messages/:ID', async (req, res) => {
-  const from = req.headers.user;
-  const { ID } = req.params;
-  const to = stripHtml(req.body.to ?? '').result;
-  const text = stripHtml(req.body.text ?? '').result;
-  const type = stripHtml(req.body.type ?? '').result;
+  const ID = clearHTML(req.params.ID);
+  const from = clearHTML(req.headers.user);
+  const { to, text, type } = clearHTML(req.body);
   const valid = !messageSchema.validate({ from, to, text, type }).error;
   if (!valid) {
     return res
